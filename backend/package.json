@@ -1,0 +1,39 @@
+{
+  "name": "outreach-api",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Cold outreach API — Express + Prisma backend (source, audit, PageSpeed, draft, review, AI editor, multi-campaign, sending) with a cron job worker. Frontend SPA lives in ./frontend.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "tick": "node bin/tick.js",
+    "test": "node --test test/unit.test.js",
+    "prisma:pull": "prisma db pull",
+    "prisma:generate": "prisma generate"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@prisma/client": "^6.1.0",
+    "bcryptjs": "^2.4.3",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.7",
+    "express": "^4.22.2",
+    "express-session": "^1.19.0",
+    "imapflow": "^1.6.5",
+    "nodemailer": "^9.0.5",
+    "openai": "^4.77.3",
+    "pdfkit": "^0.19.1",
+    "robots-parser": "^3.0.1"
+  },
+  "devDependencies": {
+    "prisma": "^6.1.0"
+  }
+}

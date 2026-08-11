@@ -1,0 +1,322 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model api_keys {
+  id             Int       @id @default(autoincrement())
+  provider       String    @db.VarChar(32)
+  label          String?   @db.VarChar(255)
+  key_ciphertext String    @db.LongText
+  key_hint       String?   @db.VarChar(16)
+  status         String    @default("active") @db.VarChar(16)
+  cooldown_until DateTime? @db.DateTime(0)
+  last_used      DateTime? @db.DateTime(0)
+  last_error     String?   @db.Text
+  created_at     DateTime  @db.DateTime(0)
+
+  @@index([provider, status], map: "idx_provider")
+}
+
+model audits {
+  id            Int       @id @default(autoincrement())
+  lead_id       Int
+  audited_at    DateTime? @db.DateTime(0)
+  reachable     Int?      @db.TinyInt
+  blocked       Int?      @db.TinyInt
+  checks_json   String?   @db.LongText
+  hook_key      String?   @db.VarChar(64)
+  hook_text     String?   @db.Text
+  hook_evidence String?   @db.Text
+  pitchable     Int?      @db.TinyInt
+  meta_json     String?   @db.LongText
+  platform      String?   @db.VarChar(64)
+
+  @@index([lead_id], map: "idx_lead")
+}
+
+model campaign_accounts {
+  campaign_id Int
+  account_id  Int
+
+  @@id([campaign_id, account_id])
+}
+
+model campaigns {
+  id                  Int      @id @default(autoincrement())
+  name                String   @db.VarChar(255)
+  industry            String   @db.VarChar(255)
+  city                String   @db.VarChar(255)
+  leads_per_run       Int      @default(60)
+  audits_per_run      Int      @default(60)
+  emails_per_day      Int      @default(30)
+  min_reviews         Int      @default(0)
+  require_website     Int      @default(1) @db.TinyInt
+  delay_ms            Int      @default(1500)
+  ai_provider         String   @default("template") @db.VarChar(32)
+  ai_model            String?  @db.VarChar(128)
+  pitch_rules         String?  @db.Text
+  sender_name         String?  @db.VarChar(255)
+  status              String   @default("active") @db.VarChar(32)
+  created_at          DateTime @db.DateTime(0)
+  sending_enabled     Int      @default(0) @db.TinyInt
+  track_opens         Int      @default(0) @db.TinyInt
+  track_clicks        Int      @default(0) @db.TinyInt
+  sender_email        String?  @db.VarChar(255)
+  booking_link        String?  @db.VarChar(512)
+  timezone            String?  @db.VarChar(64)
+  send_start_hour     Int      @default(0)
+  send_end_hour       Int      @default(24)
+  send_weekdays_only  Int      @default(0) @db.TinyInt
+  include_unsubscribe Int?     @db.TinyInt
+  source_provider     String   @default("google_places") @db.VarChar(32)
+  pagespeed_in_audit  Int      @default(0) @db.TinyInt
+  attach_report_pdf   Int      @default(0) @db.TinyInt
+  send_gap_min_sec    Int      @default(120)
+  send_gap_max_sec    Int      @default(600)
+  email_template_id   Int?
+}
+
+model companies {
+  id             Int       @id @default(autoincrement())
+  domain         String?   @unique(map: "uniq_domain") @db.VarChar(512)
+  name           String    @db.VarChar(512)
+  website        String?   @db.VarChar(1024)
+  phone          String?   @db.VarChar(128)
+  address        String?   @db.VarChar(1024)
+  street         String?   @db.VarChar(512)
+  city           String?   @db.VarChar(255)
+  state          String?   @db.VarChar(128)
+  postal_code    String?   @db.VarChar(32)
+  country        String?   @db.VarChar(128)
+  industry       String?   @db.VarChar(255)
+  rating         Float?    @db.Float
+  review_count   Int?
+  platform       String?   @db.VarChar(64)
+  email          String?   @db.VarChar(512)
+  email_type     String?   @db.VarChar(32)
+  status         String    @default("new") @db.VarChar(32)
+  tags           String?   @db.VarChar(512)
+  assigned_to    Int?
+  contract_value Int?
+  last_activity  DateTime? @db.DateTime(0)
+  created_at     DateTime  @db.DateTime(0)
+
+  @@index([status], map: "idx_status")
+}
+
+model email_templates {
+  id         Int      @id @default(autoincrement())
+  name       String   @db.VarChar(255)
+  subject    String?  @db.VarChar(512)
+  body       String?  @db.Text
+  html       String?  @db.LongText
+  created_at DateTime @db.DateTime(0)
+}
+
+model company_notes {
+  id         Int      @id @default(autoincrement())
+  company_id Int
+  user_id    Int?
+  body       String   @db.Text
+  created_at DateTime @db.DateTime(0)
+
+  @@index([company_id], map: "idx_company")
+}
+
+model drafts {
+  id            Int       @id @default(autoincrement())
+  lead_id       Int
+  audit_id      Int?
+  campaign_id   Int
+  subject       String?   @db.VarChar(512)
+  body          String?   @db.Text
+  hook_key      String?   @db.VarChar(64)
+  flags_json    String?   @db.LongText
+  source        String?   @db.VarChar(64)
+  created_at    DateTime? @db.DateTime(0)
+  decision      String    @default("pending") @db.VarChar(32)
+  final_subject String?   @db.VarChar(512)
+  final_body    String?   @db.Text
+  decided_at    DateTime? @db.DateTime(0)
+  preview_text  String?   @db.VarChar(255)
+  attach_pdf    Int?      @db.TinyInt
+
+  @@index([campaign_id], map: "idx_campaign")
+  @@index([decision], map: "idx_decision")
+}
+
+model inbox_messages {
+  id          Int       @id @default(autoincrement())
+  account_id  Int?
+  lead_id     Int?
+  company_id  Int?
+  send_id     Int?
+  from_email  String?   @db.VarChar(255)
+  subject     String?   @db.VarChar(512)
+  snippet     String?   @db.Text
+  received_at DateTime? @db.DateTime(0)
+  status      String    @default("unread") @db.VarChar(16)
+  created_at  DateTime  @db.DateTime(0)
+
+  @@index([company_id], map: "idx_company")
+  @@index([status], map: "idx_status")
+}
+
+model jobs {
+  id           Int      @id @default(autoincrement())
+  type         String   @db.VarChar(32)
+  campaign_id  Int?
+  payload_json String?  @db.LongText
+  status       String   @default("queued") @db.VarChar(16)
+  attempts     Int      @default(0)
+  last_error   String?  @db.Text
+  run_after    DateTime @db.DateTime(0)
+  created_at   DateTime @db.DateTime(0)
+  updated_at   DateTime @db.DateTime(0)
+
+  @@index([status, run_after], map: "idx_status_run")
+}
+
+model leads {
+  id           Int       @id @default(autoincrement())
+  campaign_id  Int
+  place_id     String?   @db.VarChar(255)
+  name         String    @db.VarChar(512)
+  website      String?   @db.VarChar(1024)
+  domain       String?   @db.VarChar(512)
+  phone        String?   @db.VarChar(128)
+  address      String?   @db.VarChar(1024)
+  city         String?   @db.VarChar(255)
+  industry     String?   @db.VarChar(255)
+  rating       Float?    @db.Float
+  review_count Int?
+  email        String?   @db.VarChar(512)
+  email_type   String?   @db.VarChar(32)
+  email_status String?   @db.VarChar(32)
+  first_name   String?   @db.VarChar(255)
+  sourced_at   DateTime? @db.DateTime(0)
+  status       String    @default("new") @db.VarChar(32)
+  company_id   Int?
+  score        Int?
+  lint_score   Int?
+
+  @@unique([campaign_id, place_id], map: "uniq_campaign_place")
+  @@index([campaign_id, status], map: "idx_campaign_status")
+}
+
+model sending_accounts {
+  id            Int       @id @default(autoincrement())
+  name          String    @db.VarChar(255)
+  method        String    @db.VarChar(32)
+  from_name     String?   @db.VarChar(255)
+  from_email    String?   @db.VarChar(255)
+  config_json   String?   @db.LongText
+  daily_cap     Int       @default(30)
+  sent_today    Int       @default(0)
+  warmup        Int       @default(0) @db.TinyInt
+  status        String    @default("active") @db.VarChar(32)
+  created_at    DateTime  @db.DateTime(0)
+  last_reset    DateTime? @db.Date
+  last_checked  DateTime? @db.DateTime(0)
+  bounces_today Int       @default(0)
+}
+
+model sends {
+  id                  Int       @id @default(autoincrement())
+  draft_id            Int
+  lead_id             Int
+  campaign_id         Int
+  account_id          Int?
+  provider_message_id String?   @db.VarChar(255)
+  tracking_id         String?   @db.VarChar(64)
+  status              String    @default("queued") @db.VarChar(32)
+  scheduled_at        DateTime? @db.DateTime(0)
+  sent_at             DateTime? @db.DateTime(0)
+  error               String?   @db.Text
+  created_at          DateTime  @db.DateTime(0)
+  step_no             Int       @default(1)
+  subject             String?   @db.VarChar(512)
+  body                String?   @db.Text
+  opened_at           DateTime? @db.DateTime(0)
+  clicked_at          DateTime? @db.DateTime(0)
+  replied_at          DateTime? @db.DateTime(0)
+  open_count          Int       @default(0)
+  click_count         Int       @default(0)
+  subject_variant_id  Int?
+  preview_text        String?   @db.VarChar(255)
+
+  @@index([status], map: "idx_status")
+  @@index([tracking_id], map: "idx_tracking")
+}
+
+model sequence_steps {
+  id          Int     @id @default(autoincrement())
+  campaign_id Int
+  step_no     Int
+  day_offset  Int     @default(0)
+  subject     String? @db.VarChar(512)
+  body        String? @db.Text
+  active      Int     @default(1) @db.TinyInt
+
+  @@index([campaign_id], map: "idx_campaign")
+}
+
+model settings {
+  k String  @id @db.VarChar(128)
+  v String? @db.Text
+}
+
+model subject_variants {
+  id            Int      @id @default(autoincrement())
+  campaign_id   Int
+  subject       String   @db.VarChar(512)
+  active        Int      @default(1) @db.TinyInt
+  sent_count    Int      @default(0)
+  replied_count Int      @default(0)
+  created_at    DateTime @db.DateTime(0)
+
+  @@index([campaign_id], map: "idx_campaign")
+}
+
+model suppression {
+  id         Int      @id @default(autoincrement())
+  value      String   @unique(map: "uniq_value") @db.VarChar(255)
+  kind       String   @default("email") @db.VarChar(8)
+  reason     String?  @db.VarChar(255)
+  created_at DateTime @db.DateTime(0)
+}
+
+model tracking_events {
+  id         Int      @id @default(autoincrement())
+  send_id    Int
+  type       String   @db.VarChar(16)
+  url        String?  @db.VarChar(1024)
+  ip         String?  @db.VarChar(64)
+  ua         String?  @db.VarChar(512)
+  created_at DateTime @db.DateTime(0)
+
+  @@index([send_id], map: "idx_send")
+}
+
+model users {
+  id            Int       @id @default(autoincrement())
+  email         String    @unique(map: "email") @db.VarChar(255)
+  password_hash String    @db.VarChar(255)
+  created_at    DateTime  @db.DateTime(0)
+  role          String    @default("admin") @db.VarChar(16)
+  status        String    @default("active") @db.VarChar(16)
+  last_login    DateTime? @db.DateTime(0)
+}
+
+model reports {
+  id             Int      @id @default(autoincrement())
+  lead_id        Int      @unique(map: "lead_id")
+  content_json   String?  @db.LongText
+  pagespeed_json String?  @db.LongText
+  updated_at     DateTime @db.DateTime(0)
+}
