@@ -12,9 +12,11 @@ export default function Campaign() {
   const [providers, setProviders] = useState([]);
   const [msg, setMsg] = useState("");
   const [loaded, setLoaded] = useState(!id);
+  const [newId, setNewId] = useState(null);
+  const cid = id ? Number(id) : newId;
 
-  // advanced state
-  const [sending, setSending] = useState({ sending_enabled: false, track_opens: false, track_clicks: false, attach_report_pdf: false, include_unsubscribe: "", email_template_id: "", timezone: "", send_start_hour: 0, send_end_hour: 24, send_weekdays_only: false, send_gap_min_sec: 120, send_gap_max_sec: 600 });
+  // advanced state — all editable up front, even before the campaign has been created
+  const [sending, setSending] = useState({ sending_enabled: false, track_opens: false, track_clicks: false, attach_report_pdf: true, include_unsubscribe: "", email_template_id: "", timezone: "", send_start_hour: 0, send_end_hour: 24, send_weekdays_only: false, send_gap_min_sec: 120, send_gap_max_sec: 600 });
   const [designs, setDesigns] = useState([]);
   const [accounts, setAccounts] = useState({ all: [], assigned: new Set() });
   const [subjects, setSubjects] = useState([]);
@@ -25,6 +27,10 @@ export default function Campaign() {
 
   useEffect(() => { api("/api/ai/providers").then((p) => setProviders(["template", ...p.available])).catch(() => setProviders(["template"])); }, []);
   useEffect(() => { api("/api/templates").then(setDesigns).catch(() => setDesigns([])); }, []);
+  useEffect(() => {
+    if (id) return; // new campaign — still list inboxes so they can be picked before saving
+    api("/api/accounts").then((all) => setAccounts((a) => ({ ...a, all }))).catch(() => {});
+  }, [id]);
   useEffect(() => {
     if (!id) return;
     (async () => {
@@ -41,30 +47,61 @@ export default function Campaign() {
   }, [id]);
 
   const set = (k, v) => setC((s) => ({ ...s, [k]: v }));
+
+  // Creates the campaign the first time any section is saved, carrying over
+  // whatever the user already filled in on the other (until-now unsaved) sections.
+  const ensureCampaign = async () => {
+    if (cid) return cid;
+    if (!c.name.trim() || !c.industry.trim() || !c.city.trim()) throw new Error("Name, industry and city are required first");
+    const body = { ...c, emails_per_day: +c.emails_per_day || 0, min_reviews: +c.min_reviews || 0, leads_per_run: +c.leads_per_run || 0 };
+    const r = await api("/api/campaigns", { method: "POST", body });
+    const newCid = r.id;
+    try {
+      await api(`/api/campaigns/${newCid}`, { method: "PUT", body: { ...sending, booking_link: booking } });
+      await api(`/api/campaigns/${newCid}/accounts`, { method: "PUT", body: { account_ids: [...accounts.assigned] } });
+      await api(`/api/campaigns/${newCid}/subjects`, { method: "PUT", body: { variants: subjects } });
+      await api(`/api/campaigns/${newCid}/sequence`, { method: "PUT", body: { steps: steps.map((st, i) => ({ ...st, step_no: i + 2 })) } });
+    } catch (e) { toast(e.message); }
+    setNewId(newCid);
+    nav(`/campaign?id=${newCid}`, { replace: true });
+    return newCid;
+  };
+
   const save = async () => {
     setMsg("Saving…");
-    const body = { ...c, emails_per_day: +c.emails_per_day || 0, min_reviews: +c.min_reviews || 0, leads_per_run: +c.leads_per_run || 0 };
-    try { if (id) { await api(`/api/campaigns/${id}`, { method: "PUT", body }); setMsg("Saved."); toast("Saved"); } else { const r = await api("/api/campaigns", { method: "POST", body }); nav(`/campaign?id=${r.id}`); } }
-    catch (e) { setMsg(e.message); }
+    try {
+      if (cid) {
+        const body = { ...c, emails_per_day: +c.emails_per_day || 0, min_reviews: +c.min_reviews || 0, leads_per_run: +c.leads_per_run || 0 };
+        await api(`/api/campaigns/${cid}`, { method: "PUT", body });
+        setMsg("Saved."); toast("Saved");
+      } else {
+        await ensureCampaign();
+        setMsg("Campaign created."); toast("Campaign created");
+      }
+    } catch (e) { setMsg(e.message); }
   };
 
   const saveSending = async () => {
     try {
-      await api(`/api/campaigns/${id}`, { method: "PUT", body: { ...sending } });
-      await api(`/api/campaigns/${id}/accounts`, { method: "PUT", body: { account_ids: [...accounts.assigned] } });
+      const id2 = await ensureCampaign();
+      await api(`/api/campaigns/${id2}`, { method: "PUT", body: { ...sending } });
+      await api(`/api/campaigns/${id2}/accounts`, { method: "PUT", body: { account_ids: [...accounts.assigned] } });
       toast("Sending settings saved");
     } catch (e) { toast(e.message); }
   };
   const toggleAssign = (aid) => setAccounts((a) => { const s = new Set(a.assigned); s.has(aid) ? s.delete(aid) : s.add(aid); return { ...a, assigned: s }; });
 
-  const saveSubjects = async () => { try { await api(`/api/campaigns/${id}/subjects`, { method: "PUT", body: { variants: subjects } }); toast("Subjects saved"); api(`/api/campaigns/${id}/subjects`).then(setSubjects); } catch (e) { toast(e.message); } };
-  const saveSequence = async () => { const s = steps.map((st, i) => ({ ...st, step_no: i + 2 })); try { await api(`/api/campaigns/${id}/sequence`, { method: "PUT", body: { steps: s } }); toast("Sequence saved"); } catch (e) { toast(e.message); } };
-  const saveBooking = async () => { try { await api(`/api/campaigns/${id}`, { method: "PUT", body: { booking_link: booking } }); toast("Saved"); } catch (e) { toast(e.message); } };
+  const saveSubjects = async () => { try { const id2 = await ensureCampaign(); await api(`/api/campaigns/${id2}/subjects`, { method: "PUT", body: { variants: subjects } }); toast("Subjects saved"); api(`/api/campaigns/${id2}/subjects`).then(setSubjects); } catch (e) { toast(e.message); } };
+  const saveSequence = async () => { try { const id2 = await ensureCampaign(); const s = steps.map((st, i) => ({ ...st, step_no: i + 2 })); await api(`/api/campaigns/${id2}/sequence`, { method: "PUT", body: { steps: s } }); toast("Sequence saved"); } catch (e) { toast(e.message); } };
+  const saveBooking = async () => { try { const id2 = await ensureCampaign(); await api(`/api/campaigns/${id2}`, { method: "PUT", body: { booking_link: booking } }); toast("Saved"); } catch (e) { toast(e.message); } };
 
   const importCsv = async () => {
     if (!csv.trim()) { toast("Paste or choose a CSV first"); return; }
     setImportMsg("Importing…");
-    try { const r = await api(`/api/campaigns/${id}/import`, { method: "POST", body: { csv } }); setImportMsg(`Queued ${r.parsed} lead(s)${r.skipped ? `, ${r.skipped} skipped` : ""} in ${r.chunks} batch(es).`); setCsv(""); if (fileRef.current) fileRef.current.value = ""; toast("Import queued"); }
+    try {
+      const id2 = await ensureCampaign();
+      const r = await api(`/api/campaigns/${id2}/import`, { method: "POST", body: { csv } }); setImportMsg(`Queued ${r.parsed} lead(s)${r.skipped ? `, ${r.skipped} skipped` : ""} in ${r.chunks} batch(es).`); setCsv(""); if (fileRef.current) fileRef.current.value = ""; toast("Import queued");
+    }
     catch (e) { setImportMsg(e.message); }
   };
   const onFile = (e) => { const f = e.target.files?.[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => setCsv(rd.result); rd.readAsText(f); };
@@ -102,10 +139,9 @@ export default function Campaign() {
         <div className="field"><label className="fld">Model (optional)</label><input value={c.ai_model} onChange={(e) => set("ai_model", e.target.value)} placeholder="leave blank for default" /></div>
         <div className="field"><label className="fld">Pitch rules</label><textarea rows={4} value={c.pitch_rules} onChange={(e) => set("pitch_rules", e.target.value)} placeholder="- Never open with 'I noticed'" /></div>
       </div>
-      <div className="row"><button className="primary" onClick={save}>Save campaign</button><span className="hint">{msg}</span></div>
+      <div className="row"><button className="primary" onClick={save}>{cid ? "Save campaign" : "Create campaign"}</button><span className="hint">{msg}</span></div>
 
-      {id && (
-        <>
+      <>
           <div className="card" style={{ marginTop: 18 }}>
             <h2>Import leads (CSV)</h2>
             <div className="sub">Upload or paste a CSV. First row is a header: <span className="mono">name, website, email, phone, city, reviews</span>. Large files import in batches.</div>
@@ -117,10 +153,15 @@ export default function Campaign() {
           <div className="card">
             <h2>Sending</h2>
             <div className="sub">When enabled, approving a draft queues it to the assigned inboxes (rotated, capped).</div>
+
+            <label style={{ display: "flex", gap: 12, alignItems: "flex-start", background: "var(--brand-50)", border: "1px solid var(--brand-100)", borderRadius: 8, padding: "12px 14px", marginBottom: 16 }}>
+              <input type="checkbox" style={{ marginTop: 2 }} checked={sending.attach_report_pdf} onChange={(e) => setSending({ ...sending, attach_report_pdf: e.target.checked })} />
+              <span><b style={{ fontSize: 14 }}>Attach the audit PDF to the first email</b><div className="hint" style={{ marginTop: 4 }}>A personalized report per lead makes the pitch far more credible. On by default.</div></span>
+            </label>
+
             <label style={{ display: "block", marginBottom: 8 }}><input type="checkbox" checked={sending.sending_enabled} onChange={(e) => setSending({ ...sending, sending_enabled: e.target.checked })} /> Enable sending for this campaign</label>
             <label style={{ display: "block", marginBottom: 8 }}><input type="checkbox" checked={sending.track_opens} onChange={(e) => setSending({ ...sending, track_opens: e.target.checked })} /> Track opens <span className="hint">(off is safer for cold email)</span></label>
-            <label style={{ display: "block", marginBottom: 8 }}><input type="checkbox" checked={sending.track_clicks} onChange={(e) => setSending({ ...sending, track_clicks: e.target.checked })} /> Track clicks</label>
-            <label style={{ display: "block", marginBottom: 14 }}><input type="checkbox" checked={sending.attach_report_pdf} onChange={(e) => setSending({ ...sending, attach_report_pdf: e.target.checked })} /> Attach the audit PDF to the first email <span className="hint">(generated per lead)</span></label>
+            <label style={{ display: "block", marginBottom: 14 }}><input type="checkbox" checked={sending.track_clicks} onChange={(e) => setSending({ ...sending, track_clicks: e.target.checked })} /> Track clicks</label>
             <div className="field"><label className="fld">Unsubscribe link</label>
               <select value={sending.include_unsubscribe} onChange={(e) => setSending({ ...sending, include_unsubscribe: e.target.value })}><option value="">Use workspace default</option><option value="on">Always include</option><option value="off">Remove from this campaign</option></select>
               <div className="hint" style={{ marginTop: 4 }}>Applies to your own inboxes. Removing opt-out can violate <b>CAN-SPAM</b>/<b>GDPR</b>.</div>
@@ -187,7 +228,6 @@ export default function Campaign() {
             </div>
           )}
         </>
-      )}
     </div>
   );
 }

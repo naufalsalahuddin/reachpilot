@@ -34,8 +34,11 @@ router.get("/api/companies", async (req, res) => {
     const per = clampInt(req.query.per, 25, 5, 100);
     const where = await buildWhere(req.query);
     const total = await prisma.companies.count({ where });
+    const orderBy = req.query.sort === "no_email"
+      ? [{ email: { sort: "asc", nulls: "first" } }, { id: "desc" }]
+      : [{ last_activity: { sort: "desc", nulls: "last" } }, { id: "desc" }];
     const items = await prisma.companies.findMany({
-      where, orderBy: [{ last_activity: { sort: "desc", nulls: "last" } }, { id: "desc" }], skip: (page - 1) * per, take: per,
+      where, orderBy, skip: (page - 1) * per, take: per,
     });
     // campaign counts per company
     const ids = items.map((c) => c.id);

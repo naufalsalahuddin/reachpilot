@@ -78,7 +78,7 @@ export default function Dashboard() {
             </div>
             <span className="spacer" />
             <Link className="btn sm" to={`/campaign?id=${c.id}`}>Edit</Link>
-            <Link className="btn sm" to={`/review?campaign=${c.id}`}>Review{c.pending_review ? ` (${c.pending_review})` : ""}</Link>
+            {c.pending_review ? <Link className="btn sm" to={`/review?campaign=${c.id}`}>Review ({c.pending_review})</Link> : null}
             <button className="sm primary" onClick={() => run(c.id)}>Run</button>
           </div>
           <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>

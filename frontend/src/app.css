@@ -19,15 +19,21 @@ a { color: var(--brand); text-decoration: none; }
 a:hover { text-decoration: underline; }
 h1, h2, h3 { letter-spacing: -.008em; margin: 0; }
 
-/* custom checkboxes */
+/* toggle switches (every checkbox in the app renders as a switch) */
 input[type="checkbox"] {
-  appearance: none; -webkit-appearance: none; width: 16px; height: 16px; flex: 0 0 16px;
-  border: 2px solid #b3bac5; border-radius: 4px; background: #fff; cursor: pointer; position: relative;
-  vertical-align: -3px; transition: .12s;
+  appearance: none; -webkit-appearance: none; width: 36px !important; height: 20px; flex: 0 0 36px;
+  border: none; border-radius: 20px; background: #c1c7d0; cursor: pointer; position: relative;
+  vertical-align: -5px; transition: background .15s;
 }
-input[type="checkbox"]:hover { border-color: var(--brand); }
-input[type="checkbox"]:checked { background: var(--brand); border-color: var(--brand); }
-input[type="checkbox"]:checked::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+input[type="checkbox"]::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(9,30,66,.3); transition: left .15s;
+}
+input[type="checkbox"]:hover { background: #a5adba; }
+input[type="checkbox"]:checked { background: var(--brand); }
+input[type="checkbox"]:checked:hover { background: var(--brand-600); }
+input[type="checkbox"]:checked::after { left: 18px; }
+input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
 input[type="checkbox"]:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-100); }
 
 /* custom scrollbar (subtle) */
@@ -96,7 +102,6 @@ label.fld { font-size: 12px; font-weight: 600; color: var(--muted); display: blo
 input, textarea, select { width: 100%; font-family: var(--sans); font-size: 14px; padding: 9px 11px; border: 1.5px solid var(--rule); border-radius: 6px; background: #fafbfc; color: var(--ink); transition: background .1s, border-color .1s; }
 input:hover, textarea:hover, select:hover { background: #f4f5f7; }
 input:focus, textarea:focus, select:focus { background: #fff; }
-input[type="checkbox"] { width: auto; }
 textarea { resize: vertical; }
 input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-100); }
 .field { margin-bottom: 15px; }

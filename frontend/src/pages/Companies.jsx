@@ -14,6 +14,7 @@ export default function Companies() {
   const [campaigns, setCampaigns] = useState([]);
   const [tag, setTag] = useState("");
   const [tags, setTags] = useState([]);
+  const [sort, setSort] = useState("");
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
   const [kpis, setKpis] = useState(null);
@@ -21,13 +22,13 @@ export default function Companies() {
   useEffect(() => { api("/api/campaigns").then(setCampaigns).catch(() => {}); api("/api/companies/stats").then(setKpis).catch(() => {}); api("/api/companies/tags").then(setTags).catch(() => {}); }, []);
   const load = async (p = page) => {
     setPage(p);
-    const params = new URLSearchParams({ page: p, per: 25, q, status, campaign, tag });
+    const params = new URLSearchParams({ page: p, per: 25, q, status, campaign, tag, sort });
     try { setData(await api(`/api/companies?${params}`)); } catch (e) { setData({ error: e.message }); }
   };
-  useEffect(() => { load(1); }, [tag]);
+  useEffect(() => { load(1); }, [tag, sort]);
 
   const exportCsv = () => {
-    const params = new URLSearchParams({ q, status, campaign, tag });
+    const params = new URLSearchParams({ q, status, campaign, tag, sort });
     window.location = `${apiBase}/api/companies/export?${params}`;
   };
 
@@ -51,6 +52,10 @@ export default function Companies() {
         {tags.length > 0 && <select style={{ width: "auto" }} value={tag} onChange={(e) => setTag(e.target.value)}>
           <option value="">All tags</option>{tags.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>}
+        <select style={{ width: "auto" }} value={sort} onChange={(e) => setSort(e.target.value)}>
+          <option value="">Sort: recent activity</option>
+          <option value="no_email">Sort: missing email first</option>
+        </select>
         <button className="sm" onClick={() => load(1)}>Search</button>
         <span className="spacer" />
         <button className="sm" onClick={exportCsv}>Export CSV</button>
@@ -65,7 +70,7 @@ export default function Companies() {
               <div className="list-row" key={c.id} style={{ cursor: "pointer" }} onClick={() => nav(`/company?id=${c.id}`)}>
                 <div style={{ flex: 1 }}>
                   <div className="title">{c.name} {c.platform && <span className="tag">{c.platform}</span>} {(c.tags || "").split(",").map((t) => t.trim()).filter(Boolean).slice(0, 4).map((t) => <span className="chip-tag" key={t} style={{ padding: "1px 7px", cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); setTag(t); }}>{t}</span>)}</div>
-                  <div className="meta">{c.domain || c.website || ""}{c.city ? " · " + c.city : ""}{c.email ? " · " + c.email : ""} · {c.campaigns} campaign{c.campaigns !== 1 ? "s" : ""}</div>
+                  <div className="meta">{c.domain || c.website || ""}{c.city ? " · " + c.city : ""} · {c.email ? c.email : <span className="badge warn">no email</span>} · {c.campaigns} campaign{c.campaigns !== 1 ? "s" : ""}</div>
                 </div>
                 <span className={`badge ${CLS[c.status] || "gray"}`} style={{ textTransform: "capitalize" }}>{c.status}</span>
                 <span className="hint mono">{fmtDate(c.last_activity)}</span>

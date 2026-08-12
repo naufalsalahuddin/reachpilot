@@ -182,8 +182,8 @@ function Editor({ draftId, providers, presets, onClose, onDone }) {
               </div>
             </div>
 
-            <div className="row" style={{ marginTop: 14 }}>
-              <label className="hint" style={{ display: "flex", alignItems: "center", gap: 7 }} title="Attach the lead's audit PDF to this email">
+            <div className="row" style={{ marginTop: 14, alignItems: "center", background: "var(--brand-50)", border: "1px solid var(--brand-100)", borderRadius: 8, padding: "10px 14px" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 600, fontSize: 13.5 }} title="Attach the lead's audit PDF to this email">
                 <input type="checkbox" checked={attachPdf} onChange={(e) => setAttachPdf(e.target.checked)} /> Attach audit PDF to this email
               </label>
               <span className="spacer" />
