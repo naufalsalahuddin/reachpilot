@@ -15,35 +15,43 @@ app.set("trust proxy", 1);
 
 // CORS for the SPA origin(s). FRONTEND_ORIGIN can be a comma-separated allowlist;
 // otherwise the request origin is reflected (fine for local dev on localhost:5173).
-const allowlist = (process.env.FRONTEND_ORIGIN || "").split(",").map((s) => s.trim()).filter(Boolean);
-app.use(cors({
-  credentials: true,
-  origin(origin, cb) {
-    if (!origin) return cb(null, true); // curl / same-origin / server-to-server
-    if (!allowlist.length || allowlist.includes(origin)) return cb(null, true);
-    cb(new Error(`origin ${origin} not allowed by CORS`));
-  },
-}));
+const allowlist = (process.env.FRONTEND_ORIGIN || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+app.use(
+  cors({
+    credentials: true,
+    origin(origin, cb) {
+      if (!origin) return cb(null, true); // curl / same-origin / server-to-server
+      if (!allowlist.length || allowlist.includes(origin))
+        return cb(null, true);
+      cb(new Error(`origin ${origin} not allowed by CORS`));
+    },
+  }),
+);
 
 app.use(express.json({ limit: "5mb" })); // headroom for CSV imports
 app.use(express.urlencoded({ extended: true }));
-app.use(session({
-  secret: config.sessionSecret,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: process.env.COOKIE_SAMESITE || "lax", // set 'none' + secure for cross-site prod
-    secure: process.env.COOKIE_SECURE === "true",
-    maxAge: 1000 * 60 * 60 * 24 * 14,
-  },
-}));
+app.use(
+  session({
+    secret: config.sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: process.env.COOKIE_SAMESITE || "lax", // set 'none' + secure for cross-site prod
+      secure: process.env.COOKIE_SECURE === "true",
+      maxAge: 1000 * 60 * 60 * 24 * 14,
+    },
+  }),
+);
 
 // ---- public routes (no session) ----
-app.use(require("./routes/cron"));      // /cron/tick (token-guarded)
-app.use(require("./routes/tracking"));  // /t/o, /t/c, /u/:tid, /webhook/meeting
-app.use(require("./routes/auth"));      // /api/login, /api/logout, /api/me, /api/profile
-app.get("/", (req, res) => res.json({ ok: true, service: "outreach-api" }));
+app.use(require("./routes/cron")); // /cron/tick (token-guarded)
+app.use(require("./routes/tracking")); // /t/o, /t/c, /u/:tid, /webhook/meeting
+app.use(require("./routes/auth")); // /api/login, /api/logout, /api/me, /api/profile
+app.get("/", (req, res) => res.json({ ok: true, service: "deployit-api" }));
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 app.use(require("./routes/branding")); // public: /api/branding
 
@@ -73,12 +81,24 @@ app.use((req, res) => res.status(404).json({ error: "not found" }));
 
 function validateEnv() {
   const problems = [];
-  if (!process.env.DATABASE_URL) problems.push("DATABASE_URL is not set — Prisma cannot connect");
-  if (!process.env.APP_SECRET && !process.env.SESSION_SECRET) problems.push("APP_SECRET/SESSION_SECRET not set — encryption + sessions use an insecure dev key");
-  if (!config.cronToken) console.warn("[env] CRON_TOKEN not set — /cron/tick and the meeting webhook are unguarded");
+  if (!process.env.DATABASE_URL)
+    problems.push("DATABASE_URL is not set — Prisma cannot connect");
+  if (!process.env.APP_SECRET && !process.env.SESSION_SECRET)
+    problems.push(
+      "APP_SECRET/SESSION_SECRET not set — encryption + sessions use an insecure dev key",
+    );
+  if (!config.cronToken)
+    console.warn(
+      "[env] CRON_TOKEN not set — /cron/tick and the meeting webhook are unguarded",
+    );
   if (problems.length) {
-    console.warn("[env] configuration warnings:\n  - " + problems.join("\n  - "));
-    if (!process.env.DATABASE_URL) { console.error("Refusing to start without DATABASE_URL."); process.exit(1); }
+    console.warn(
+      "[env] configuration warnings:\n  - " + problems.join("\n  - "),
+    );
+    if (!process.env.DATABASE_URL) {
+      console.error("Refusing to start without DATABASE_URL.");
+      process.exit(1);
+    }
   }
 }
 
@@ -87,11 +107,16 @@ async function main() {
   await auth.ensureAdmin();
   app.listen(config.port, () => {
     console.log(`\n  Outreach API on http://localhost:${config.port}`);
-    console.log(`  Cron tick: /cron/tick?token=${config.cronToken ? "***" : "(set CRON_TOKEN)"}`);
+    console.log(
+      `  Cron tick: /cron/tick?token=${config.cronToken ? "***" : "(set CRON_TOKEN)"}`,
+    );
     require("./jobs/scheduler").start();
   });
 }
 
-main().catch((e) => { console.error("Failed to start:", e.message); process.exit(1); });
+main().catch((e) => {
+  console.error("Failed to start:", e.message);
+  process.exit(1);
+});
 
 module.exports = app;
