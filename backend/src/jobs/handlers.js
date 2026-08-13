@@ -98,10 +98,27 @@ async function handleImport(job) {
   let payload = {};
   try { payload = JSON.parse(job.payload_json || "{}"); } catch { payload = {}; }
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  const insertedIds = [];
   let inserted = 0;
   for (const lead of rows) {
-    try { if (await data.insertLead(job.campaign_id, lead)) inserted++; } catch { /* skip bad row */ }
+    try { const id = await data.insertLead(job.campaign_id, lead); if (id) { inserted++; insertedIds.push(id); } } catch { /* skip bad row */ }
   }
+
+  const campaign = await getCampaign(job.campaign_id);
+  if (campaign.flow_id) {
+    // Flow-mode campaigns don't run the legacy audit/enrich chain — imported
+    // leads skip the (search-only) lead_source block and advance straight past
+    // it, exactly like a lead that finished any other node would.
+    const flowEngine = require("./flowEngine");
+    const { graph } = await flowEngine.loadGraph(campaign.id);
+    const entry = graph.nodes.find((n) => n.id === graph.entry);
+    if (entry && insertedIds.length) {
+      const leads = await prisma.leads.findMany({ where: { id: { in: insertedIds } } });
+      for (const lead of leads) await flowEngine.advanceLead(graph, entry, lead);
+    }
+    return `${inserted}/${rows.length} imported (flow)${payload.last ? " (final chunk)" : ""}`;
+  }
+
   if (payload.last) {
     await queue.enqueue("audit", job.campaign_id);
     await queue.enqueue("enrich", job.campaign_id);
@@ -116,20 +133,7 @@ async function attachPagespeed(result, website) {
     const ps = await pagespeed.runBoth(website);
     result.meta = result.meta || {};
     result.meta.pagespeed = ps;
-    for (const strat of ["mobile", "desktop"]) {
-      const r = ps[strat];
-      if (r && r.score != null) {
-        const evidence = Object.entries(r.metrics).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join("; ");
-        result.checks.push({
-          key: `pagespeed_${strat}`,
-          state: r.score >= 90 ? "PASS" : r.score >= 50 ? "UNKNOWN" : "FAIL",
-          tier: 2,
-          label: `PageSpeed ${strat}: ${r.score}/100`,
-          detail: `Google Lighthouse performance score on ${strat} is ${r.score}/100.`,
-          evidence,
-        });
-      }
-    }
+    result.checks.push(...pagespeed.buildChecks(ps));
     result.fail_count = result.checks.filter((c) => c.state === "FAIL").length;
   } catch { /* pagespeed is best-effort; never fail the audit over it */ }
 }
@@ -147,10 +151,11 @@ async function handleAudit(job) {
     return "nothing to audit";
   }
 
+  const skipGroups = (c.disabled_checks || "").split(",").map((s) => s.trim()).filter(Boolean);
   let hooks = 0, blocked = 0, clean = 0;
   for (const lead of rows) {
     let res;
-    try { res = await auditSite(lead.website); }
+    try { res = await auditSite(lead.website, { skipGroups }); }
     catch { await prisma.leads.update({ where: { id: lead.id }, data: { status: "skipped" } }); continue; }
 
     if (c.pagespeed_in_audit && !res.blocked) await attachPagespeed(res, lead.website);
@@ -205,10 +210,10 @@ async function handleDraft(job) {
     let pagespeed = null;
     try { const meta = JSON.parse(audit.meta_json || "{}"); pagespeed = meta.pagespeed || null; } catch { /* ignore */ }
 
-    const { subject, body, flags, source } = await makeDraft(
+    const { subject, body, preview, flags, source } = await makeDraft(
       lead, hook, c.sender_name || "", { provider, model: c.ai_model, rules: c.pitch_rules, pagespeed }
     );
-    await data.saveDraft(lead.id, audit.id, c.id, subject, body, audit.hook_key, flags, source);
+    await data.saveDraft(lead.id, audit.id, c.id, subject, body, audit.hook_key, flags, source, preview);
     done++;
   }
 
@@ -449,4 +454,8 @@ const HANDLERS = {
   draft: handleDraft, send: handleSend, import: handleImport,
 };
 
-module.exports = { HANDLERS, chooseEmail, classifyEmail };
+module.exports = {
+  HANDLERS, chooseEmail, classifyEmail,
+  // shared with the flow engine's `send` block adapter (lib/flow/blocks/send.js)
+  renderVars, withinSendWindow, dmarcOk, textToHtml, preheaderHtml, bodyContentHtml, getDesign,
+};

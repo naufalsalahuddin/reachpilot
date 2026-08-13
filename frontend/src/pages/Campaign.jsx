@@ -1,6 +1,9 @@
 import React, { useEffect, useState, useRef } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams, useNavigate, Link } from "react-router-dom";
 import { api, toast, TIMEZONES } from "../api.js";
+import { AUDIT_CHECK_GROUPS, HOOK_VARIABLES, PAGESPEED_VARIABLES } from "../flowConstants.js";
+import InsertVariable from "../components/InsertVariable.jsx";
+import CsvDropzone from "../components/CsvDropzone.jsx";
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 
@@ -8,7 +11,7 @@ export default function Campaign() {
   const [sp] = useSearchParams();
   const id = sp.get("id");
   const nav = useNavigate();
-  const [c, setC] = useState({ name: "", industry: "", city: "", emails_per_day: 30, min_reviews: 15, leads_per_run: 60, sender_name: "", source_provider: "google_places", pagespeed_in_audit: 0, ai_provider: "template", ai_model: "", pitch_rules: "" });
+  const [c, setC] = useState({ name: "", industry: "", city: "", emails_per_day: 30, min_reviews: 15, leads_per_run: 60, sender_name: "", source_provider: "google_places", pagespeed_in_audit: 0, ai_provider: "template", ai_model: "", pitch_rules: "", disabled_checks: [] });
   const [providers, setProviders] = useState([]);
   const [msg, setMsg] = useState("");
   const [loaded, setLoaded] = useState(!id);
@@ -23,7 +26,8 @@ export default function Campaign() {
   const [steps, setSteps] = useState([]);
   const [booking, setBooking] = useState("");
   const [stats, setStats] = useState(null);
-  const [csv, setCsv] = useState(""); const [importMsg, setImportMsg] = useState(""); const fileRef = useRef();
+  const [csv, setCsv] = useState(""); const [importMsg, setImportMsg] = useState("");
+  const pitchRulesRef = useRef();
 
   useEffect(() => { api("/api/ai/providers").then((p) => setProviders(["template", ...p.available])).catch(() => setProviders(["template"])); }, []);
   useEffect(() => { api("/api/templates").then(setDesigns).catch(() => setDesigns([])); }, []);
@@ -35,7 +39,10 @@ export default function Campaign() {
     if (!id) return;
     (async () => {
       const d = await api(`/api/campaigns/${id}`);
-      setC({ name: d.name, industry: d.industry, city: d.city, emails_per_day: d.emails_per_day, min_reviews: d.min_reviews, leads_per_run: d.leads_per_run, sender_name: d.sender_name || "", source_provider: d.source_provider || "google_places", pagespeed_in_audit: d.pagespeed_in_audit || 0, ai_provider: d.ai_provider || "template", ai_model: d.ai_model || "", pitch_rules: d.pitch_rules || "" });
+      // Flow-mode campaigns live entirely on the dedicated flow builder — this
+      // classic form never shows their pipeline shape, so hand off immediately.
+      if (d.flow_id) { nav(`/flow?id=${id}`, { replace: true }); return; }
+      setC({ name: d.name, industry: d.industry, city: d.city, emails_per_day: d.emails_per_day, min_reviews: d.min_reviews, leads_per_run: d.leads_per_run, sender_name: d.sender_name || "", source_provider: d.source_provider || "google_places", pagespeed_in_audit: d.pagespeed_in_audit || 0, ai_provider: d.ai_provider || "template", ai_model: d.ai_model || "", pitch_rules: d.pitch_rules || "", disabled_checks: d.disabled_checks ? d.disabled_checks.split(",").filter(Boolean) : [] });
       setSending({ sending_enabled: !!d.sending_enabled, track_opens: !!d.track_opens, track_clicks: !!d.track_clicks, attach_report_pdf: !!d.attach_report_pdf, include_unsubscribe: d.include_unsubscribe == null ? "" : (d.include_unsubscribe ? "on" : "off"), email_template_id: d.email_template_id || "", timezone: d.timezone || "", send_start_hour: d.send_start_hour ?? 0, send_end_hour: d.send_end_hour ?? 24, send_weekdays_only: !!d.send_weekdays_only, send_gap_min_sec: d.send_gap_min_sec ?? 120, send_gap_max_sec: d.send_gap_max_sec ?? 600 });
       setBooking(d.booking_link || "");
       api(`/api/campaigns/${id}/accounts`).then((a) => setAccounts({ all: a.all, assigned: new Set(a.assigned) }));
@@ -44,9 +51,10 @@ export default function Campaign() {
       api(`/api/campaigns/${id}/stats`).then(setStats);
       setLoaded(true);
     })().catch((e) => { setMsg(e.message); setLoaded(true); });
-  }, [id]);
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (k, v) => setC((s) => ({ ...s, [k]: v }));
+  const toggleCheck = (key) => setC((s) => ({ ...s, disabled_checks: s.disabled_checks.includes(key) ? s.disabled_checks.filter((k) => k !== key) : [...s.disabled_checks, key] }));
 
   // Creates the campaign the first time any section is saved, carrying over
   // whatever the user already filled in on the other (until-now unsaved) sections.
@@ -57,7 +65,7 @@ export default function Campaign() {
     const r = await api("/api/campaigns", { method: "POST", body });
     const newCid = r.id;
     try {
-      await api(`/api/campaigns/${newCid}`, { method: "PUT", body: { ...sending, booking_link: booking } });
+      await api(`/api/campaigns/${newCid}`, { method: "PUT", body: { ...sending, booking_link: booking, pagespeed_in_audit: c.pagespeed_in_audit, disabled_checks: c.disabled_checks } });
       await api(`/api/campaigns/${newCid}/accounts`, { method: "PUT", body: { account_ids: [...accounts.assigned] } });
       await api(`/api/campaigns/${newCid}/subjects`, { method: "PUT", body: { variants: subjects } });
       await api(`/api/campaigns/${newCid}/sequence`, { method: "PUT", body: { steps: steps.map((st, i) => ({ ...st, step_no: i + 2 })) } });
@@ -100,16 +108,23 @@ export default function Campaign() {
     setImportMsg("Importing…");
     try {
       const id2 = await ensureCampaign();
-      const r = await api(`/api/campaigns/${id2}/import`, { method: "POST", body: { csv } }); setImportMsg(`Queued ${r.parsed} lead(s)${r.skipped ? `, ${r.skipped} skipped` : ""} in ${r.chunks} batch(es).`); setCsv(""); if (fileRef.current) fileRef.current.value = ""; toast("Import queued");
+      const r = await api(`/api/campaigns/${id2}/import`, { method: "POST", body: { csv } }); setImportMsg(`Queued ${r.parsed} lead(s)${r.skipped ? `, ${r.skipped} skipped` : ""} in ${r.chunks} batch(es).`); setCsv(""); toast("Import queued");
     }
     catch (e) { setImportMsg(e.message); }
   };
-  const onFile = (e) => { const f = e.target.files?.[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => setCsv(rd.result); rd.readAsText(f); };
 
   if (!loaded) return <div className="empty">Loading…</div>;
 
   return (
     <div style={{ maxWidth: 720 }}>
+      {!cid && (
+        <div className="card">
+          <div className="row">
+            <div style={{ flex: 1 }}><b>Classic pipeline</b><div className="hint" style={{ marginTop: 2 }}>Fixed source → audit → draft → review → send sequence.</div></div>
+            <Link className="btn sm" to="/flow?new=1">Build a custom flow instead →</Link>
+          </div>
+        </div>
+      )}
       <div className="card">
         <div className="field"><label className="fld">Campaign name</label><input value={c.name} onChange={(e) => set("name", e.target.value)} placeholder="Austin dentists — Q3" /></div>
         <div className="grid two"><div className="field"><label className="fld">Industry</label><input value={c.industry} onChange={(e) => set("industry", e.target.value)} /></div>
@@ -133,21 +148,36 @@ export default function Campaign() {
       </div>
 
       <div className="card">
+        <h2>Audit checks</h2>
+        <div className="sub">Turn off checks that don't apply to this industry — e.g. most retail businesses don't need "online booking", so leaving it on pitches a gap that isn't really one.</div>
+        <div className="grid two">
+          {AUDIT_CHECK_GROUPS.map(([key, label]) => (
+            <label key={key} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13.5 }}>
+              <input type="checkbox" checked={!c.disabled_checks.includes(key)} onChange={() => toggleCheck(key)} /> {label}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
         <h2>AI writing</h2>
         <div className="sub">Which model writes the first draft. Falls back to templates if the provider has no key.</div>
         <div className="field"><label className="fld">Writer</label><div className="segmented">{providers.map((p) => <button key={p} type="button" className={c.ai_provider === p ? "active" : ""} onClick={() => set("ai_provider", p)}>{p === "template" ? "Templates" : p}</button>)}</div></div>
         <div className="field"><label className="fld">Model (optional)</label><input value={c.ai_model} onChange={(e) => set("ai_model", e.target.value)} placeholder="leave blank for default" /></div>
-        <div className="field"><label className="fld">Pitch rules</label><textarea rows={4} value={c.pitch_rules} onChange={(e) => set("pitch_rules", e.target.value)} placeholder="- Never open with 'I noticed'" /></div>
+        <div className="field">
+          <div className="row" style={{ marginBottom: 6 }}><label className="fld" style={{ margin: 0 }}>Pitch rules</label><span className="spacer" /><InsertVariable options={c.pagespeed_in_audit ? [...HOOK_VARIABLES, ...PAGESPEED_VARIABLES] : HOOK_VARIABLES} textareaRef={pitchRulesRef} value={c.pitch_rules} onChange={(v) => set("pitch_rules", v)} /></div>
+          <textarea ref={pitchRulesRef} rows={4} value={c.pitch_rules} onChange={(e) => set("pitch_rules", e.target.value)} placeholder="- Never open with 'I noticed'" />
+          <div className="hint" style={{ marginTop: 4 }}>Insert a variable to reference what the audit found — e.g. "Always mention {"{hook_detail}"} specifically."</div>
+        </div>
       </div>
       <div className="row"><button className="primary" onClick={save}>{cid ? "Save campaign" : "Create campaign"}</button><span className="hint">{msg}</span></div>
 
       <>
           <div className="card" style={{ marginTop: 18 }}>
             <h2>Import leads (CSV)</h2>
-            <div className="sub">Upload or paste a CSV. First row is a header: <span className="mono">name, website, email, phone, city, reviews</span>. Large files import in batches.</div>
-            <div className="row" style={{ marginBottom: 10 }}><input type="file" ref={fileRef} accept=".csv,text/csv" onChange={onFile} /></div>
-            <div className="field"><label className="fld">…or paste CSV</label><textarea rows={4} value={csv} onChange={(e) => setCsv(e.target.value)} placeholder={"name,website,email,city\nAcme Dental,acmedental.com,info@acmedental.com,Austin"} /></div>
-            <div className="row"><button className="primary" onClick={importCsv}>Import</button><span className="hint">{importMsg}</span></div>
+            <div className="sub">First row is a header: <span className="mono">name, website, email, phone, city, reviews</span>. Large files import in batches.</div>
+            <CsvDropzone csv={csv} onCsvChange={setCsv} />
+            <div className="row" style={{ marginTop: 10 }}><button className="primary" onClick={importCsv}>Import</button><span className="hint">{importMsg}</span></div>
           </div>
 
           <div className="card">

@@ -10,6 +10,7 @@ const prisma = require("./prisma");
 const { cleanUrl, domainOf } = require("./url");
 const { scoreLead } = require("./leadScore");
 const { lintEmail } = require("./contentLint");
+const pagespeed = require("./pagespeed");
 
 function now() {
   return new Date();
@@ -151,13 +152,32 @@ async function latestAudit(leadId) {
   return rows[0] || null;
 }
 
+/** Fold a {mobile,desktop} PageSpeed result into an EXISTING audit row (used by the
+ * standalone `pagespeed` flow block, run after `website_audit` has already saved its
+ * own audit row) and recompute the lead's score to include it. */
+async function attachPagespeedToAudit(auditId, leadId, pagespeedResult) {
+  const audit = await prisma.audits.findUnique({ where: { id: auditId } });
+  if (!audit) return null;
+  let checks = [];
+  try { checks = JSON.parse(audit.checks_json || "[]"); } catch { checks = []; }
+  checks.push(...pagespeed.buildChecks(pagespeedResult));
+  const fail_count = checks.filter((c) => c.state === "FAIL").length;
+  let meta = {};
+  try { meta = JSON.parse(audit.meta_json || "{}"); } catch { meta = {}; }
+  meta.pagespeed = pagespeedResult;
+  await prisma.audits.update({ where: { id: auditId }, data: { checks_json: JSON.stringify(checks), meta_json: JSON.stringify(meta) } });
+  const score = scoreLead(checks, audit.hook_key, pagespeedResult);
+  await prisma.leads.update({ where: { id: leadId }, data: { score } });
+  return { fail_count, score };
+}
+
 // ------------------------------------------------------------------ drafts
-async function saveDraft(leadId, auditId, campaignId, subject, body, hookKey, flags, source) {
+async function saveDraft(leadId, auditId, campaignId, subject, body, hookKey, flags, source, previewText) {
   const row = await prisma.drafts.create({
     data: {
       lead_id: leadId, audit_id: auditId, campaign_id: campaignId,
       subject, body, hook_key: hookKey, flags_json: JSON.stringify(flags),
-      source, created_at: now(),
+      source, created_at: now(), preview_text: previewText || null,
     },
   });
   const lint = lintEmail({ subject, body });
@@ -186,5 +206,5 @@ module.exports = {
   prisma, now,
   getSetting, setSetting,
   upsertCompany, insertLead, backfillCompanies,
-  saveAudit, latestAudit, saveDraft, decide, pipelineCounts,
+  saveAudit, latestAudit, attachPagespeedToAudit, saveDraft, decide, pipelineCounts,
 };

@@ -5,11 +5,11 @@
  */
 const prisma = require("../lib/prisma");
 
-async function enqueue(type, campaignId, payload = {}, runAfter = null) {
+async function enqueue(type, campaignId, payload = {}, runAfter = null, nodeId = null) {
   const now = new Date();
   const row = await prisma.jobs.create({
     data: {
-      type, campaign_id: campaignId ?? null, payload_json: JSON.stringify(payload),
+      type, campaign_id: campaignId ?? null, node_id: nodeId, payload_json: JSON.stringify(payload),
       status: "queued", run_after: runAfter || now, created_at: now, updated_at: now,
     },
   });

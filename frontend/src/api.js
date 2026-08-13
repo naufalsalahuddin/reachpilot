@@ -25,6 +25,10 @@ export async function api(path, { method = "GET", body } = {}) {
 
 export const apiBase = BASE;
 
+// Dark launch switch for the visual flow builder — baked in at build time.
+// Must match the backend's FLOW_BUILDER_ENABLED for the API calls to work.
+export const FLOW_ENABLED = import.meta.env.VITE_FLOW_BUILDER_ENABLED === "true";
+
 let toastTimer = null;
 export function toast(msg, ms = 2200) {
   let el = document.getElementById("toast");

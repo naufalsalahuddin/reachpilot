@@ -25,8 +25,35 @@ HARD RULES — breaking any of these makes the output unusable:
 Return EXACTLY this format and nothing else:
 
 SUBJECT: <2-4 words, lowercase, specific, boring>
+PREVIEW: <8-14 words, the inbox preview text shown right after the subject — a second hook that makes someone open it, not a repeat of the subject>
 BODY:
 <the email, 50-90 words>`;
+
+/** Replace {token} with a value ONLY for tokens actually present in `vars` —
+ * unknown tokens (including the send-time {first_name}/{name}/etc ones) are
+ * left untouched, same convention as renderVars() in jobs/handlers.js. */
+function substituteVars(text, vars = {}) {
+  return String(text || "").replace(/\{(\w+)\}/g, (match, key) => (
+    Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : match
+  ));
+}
+
+/** Variables available to pitch rules from the audit/pagespeed blocks that ran
+ * before this draft — the "insert variable" menu in the UI mirrors this list. */
+function draftVars(hook, pagespeed) {
+  const v = { hook_label: hook.label || "", hook_detail: hook.detail || "", hook_evidence: hook.evidence || "" };
+  if (pagespeed?.mobile?.score != null) v.pagespeed_mobile_score = pagespeed.mobile.score;
+  if (pagespeed?.desktop?.score != null) v.pagespeed_desktop_score = pagespeed.desktop.score;
+  return v;
+}
+
+/** A short, deterministic preview line for the template fallback path (no AI call). */
+function derivePreview(hook) {
+  const detail = (hook.detail || hook.label || "").trim();
+  if (!detail) return "";
+  const lower = detail[0].toLowerCase() + detail.slice(1);
+  return lower.length > 90 ? lower.slice(0, 87).replace(/\s+\S*$/, "") + "…" : lower;
+}
 
 function pagespeedLine(pagespeed) {
   if (!pagespeed) return "";
@@ -87,7 +114,7 @@ function draftFromTemplate(lead, hook, sender) {
     year: yearMatch ? yearMatch[1] : "an old year",
     detail_lc: detail ? detail[0].toLowerCase() + detail.slice(1) : "",
   };
-  return [fill(subj, fields), fill(body, fields)];
+  return [fill(subj, fields), fill(body, fields), derivePreview(hook)];
 }
 
 async function draftWithLLM(lead, hook, sender, { provider, model, rules, pagespeed }) {
@@ -95,9 +122,9 @@ async function draftWithLLM(lead, hook, sender, { provider, model, rules, pagesp
     provider, model, system: SYSTEM, prompt: userPrompt(lead, hook, sender, rules, pagespeed),
     maxTokens: 600, temperature: 0.7,
   });
-  const m = /SUBJECT:\s*(.+?)\s*\nBODY:\s*\n([\s\S]+)/.exec(text);
+  const m = /SUBJECT:\s*(.+?)\s*\nPREVIEW:\s*(.+?)\s*\nBODY:\s*\n([\s\S]+)/.exec(text);
   if (!m) throw new Error(`Unexpected model output: ${text.slice(0, 200)}`);
-  return [m[1].trim(), m[2].trim()];
+  return [m[1].trim(), m[2].trim(), m[3].trim()];
 }
 
 // -------------------------------------------------------------- validator
@@ -141,25 +168,26 @@ function validate(body, subject, hook, lead) {
 }
 
 /**
- * @returns {Promise<{subject, body, flags, source}>}
+ * @returns {Promise<{subject, body, preview, flags, source}>}
  */
 async function makeDraft(lead, hook, sender, { provider = "template", model = null, rules = "", pagespeed = null } = {}) {
-  let subject, body, source = "template";
+  let subject, body, preview, source = "template";
   const useLlm = provider && provider !== "template";
+  const resolvedRules = substituteVars(rules, draftVars(hook, pagespeed));
 
   if (useLlm) {
     try {
-      [subject, body] = await draftWithLLM(lead, hook, sender, { provider, model, rules, pagespeed });
+      [subject, preview, body] = await draftWithLLM(lead, hook, sender, { provider, model, rules: resolvedRules, pagespeed });
       source = provider;
     } catch (exc) {
-      [subject, body] = draftFromTemplate(lead, hook, sender);
+      [subject, body, preview] = draftFromTemplate(lead, hook, sender);
       source = `template (${provider} failed: ${exc.message ? exc.message.slice(0, 60) : "error"})`;
     }
   } else {
-    [subject, body] = draftFromTemplate(lead, hook, sender);
+    [subject, body, preview] = draftFromTemplate(lead, hook, sender);
   }
 
-  return { subject, body, flags: validate(body, subject, hook, lead), source };
+  return { subject, body, preview, flags: validate(body, subject, hook, lead), source };
 }
 
-module.exports = { makeDraft, validate, draftFromTemplate, SYSTEM };
+module.exports = { makeDraft, validate, draftFromTemplate, substituteVars, draftVars, SYSTEM };

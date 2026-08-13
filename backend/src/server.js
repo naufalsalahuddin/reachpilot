@@ -52,6 +52,7 @@ app.use(auth.requireAuth);
 app.use(["/api/users", "/api/keys"], auth.requireAdmin);
 
 app.use(require("./routes/campaigns"));
+if (config.flowBuilderEnabled) app.use(require("./routes/flows")); // dark-launched — see config.js
 app.use(require("./routes/review"));
 app.use(require("./routes/ai"));
 app.use(require("./routes/accounts"));

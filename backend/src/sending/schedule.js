@@ -15,7 +15,7 @@ function render(tmpl, lead) {
   });
 }
 
-async function enqueueForDraft(draftId) {
+async function enqueueForDraft(draftId, nodeId = null) {
   const d = await prisma.drafts.findUnique({ where: { id: Number(draftId) } });
   if (!d) return { queued: 0, reason: "draft not found" };
   const lead = await prisma.leads.findUnique({ where: { id: d.lead_id } });
@@ -51,7 +51,7 @@ async function enqueueForDraft(draftId) {
   const step1At = new Date(base.getTime() + jitterMs);
 
   await prisma.sends.create({
-    data: { draft_id: d.id, lead_id: d.lead_id, campaign_id: d.campaign_id, tracking_id: newTrackingId(), status: "queued", step_no: 1, subject, body, preview_text: preview, scheduled_at: step1At, created_at: now },
+    data: { draft_id: d.id, lead_id: d.lead_id, campaign_id: d.campaign_id, tracking_id: newTrackingId(), status: "queued", step_no: 1, subject, body, preview_text: preview, scheduled_at: step1At, created_at: now, flow_node_id: nodeId },
   });
   let count = 1;
 
@@ -59,12 +59,12 @@ async function enqueueForDraft(draftId) {
   for (const st of steps) {
     const when = new Date(step1At.getTime() + (Number(st.day_offset) || 0) * 86400000);
     await prisma.sends.create({
-      data: { draft_id: d.id, lead_id: d.lead_id, campaign_id: d.campaign_id, tracking_id: newTrackingId(), status: "queued", step_no: st.step_no, subject: render(st.subject, ctx) || subject, body: render(st.body, ctx), preview_text: preview, scheduled_at: when, created_at: now },
+      data: { draft_id: d.id, lead_id: d.lead_id, campaign_id: d.campaign_id, tracking_id: newTrackingId(), status: "queued", step_no: st.step_no, subject: render(st.subject, ctx) || subject, body: render(st.body, ctx), preview_text: preview, scheduled_at: when, created_at: now, flow_node_id: nodeId },
     });
     count++;
   }
 
-  await queue.enqueue("send", d.campaign_id);
+  await queue.enqueue("send", d.campaign_id, {}, null, nodeId);
   return { queued: count };
 }
 

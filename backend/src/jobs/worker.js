@@ -3,6 +3,7 @@
 const prisma = require("../lib/prisma");
 const queue = require("./queue");
 const { HANDLERS } = require("./handlers");
+const flowEngine = require("./flowEngine");
 const rotation = require("../sending/rotation");
 const sending = require("../sending");
 const replies = require("../lib/replies");
@@ -11,15 +12,18 @@ async function maintenance() {
   try {
     await rotation.resetDailyCaps();
 
+    // Auto-continue due sends without a human action — one job per (campaign, send
+    // node). `flow_node_id` is null for every legacy (non-flow) send, so this
+    // degrades to exactly today's per-campaign behavior for legacy campaigns.
     const due = await prisma.sends.findMany({
       where: { status: "queued", scheduled_at: { lte: new Date() } },
-      distinct: ["campaign_id"], select: { campaign_id: true },
+      distinct: ["campaign_id", "flow_node_id"], select: { campaign_id: true, flow_node_id: true },
     });
-    for (const { campaign_id } of due) {
+    for (const { campaign_id, flow_node_id } of due) {
       const has = await prisma.jobs.findFirst({
-        where: { type: "send", campaign_id, status: { in: ["queued", "running"] } }, select: { id: true },
+        where: { type: "send", campaign_id, node_id: flow_node_id, status: { in: ["queued", "running"] } }, select: { id: true },
       });
-      if (!has) await queue.enqueue("send", campaign_id);
+      if (!has) await queue.enqueue("send", campaign_id, {}, null, flow_node_id);
     }
 
     // reply polling, throttled: a few owned accounts not checked in the last 10 min
@@ -57,7 +61,7 @@ async function processBatch(max = 5) {
   // record heartbeat for the System status page (best-effort)
   try { const db = require("../lib/data"); await db.setSetting("last_tick", JSON.stringify({ at: new Date().toISOString(), claimed: jobs.length })); } catch { /* ignore */ }
   for (const job of jobs) {
-    const handler = HANDLERS[job.type];
+    const handler = job.node_id ? flowEngine.handleFlowNode : HANDLERS[job.type];
     if (!handler) {
       await queue.markError(job.id, `no handler for type "${job.type}"`);
       results.push({ id: job.id, type: job.type, status: "error", note: "no handler" });

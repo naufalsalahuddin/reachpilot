@@ -31,6 +31,21 @@ const HOOK_WEIGHTS = {
   broken_links: 68, mixed_content: 60,
 };
 
+// Toggleable groups — a campaign/flow-node can disable any of these when they
+// don't apply to the industry being audited (e.g. "no online booking" isn't a
+// real gap for a retail store). Every group bundles its PASS and FAIL variants
+// together so disabling one turns the whole check off, not just one state.
+const CHECK_GROUPS = {
+  https: ["no_https", "cert_expired", "cert_expiring", "cert", "no_https_redirect"],
+  speed: ["speed", "slow", "very_slow"],
+  viewport: ["viewport", "no_viewport"],
+  phone: ["tel", "tel_not_clickable"],
+  form: ["form", "form_missing", "form_long"],
+  booking: ["booking", "no_booking"],
+  copyright: ["copyright", "stale_copyright"],
+  broken_links: ["links", "broken_links"],
+};
+
 const BOT_WALL_MARKERS = [
   "just a moment", "checking your browser", "cf-browser-verification",
   "enable javascript and cookies to continue", "ddos protection by",
@@ -138,7 +153,11 @@ function looksBlocked(status, html) {
 /**
  * Run the full audit. Returns { reachable, blocked, checks, hook, fail_count, meta }.
  */
-async function auditSite(website, { timeout = 20000, checkLinks = 8 } = {}) {
+async function auditSite(website, { timeout = 20000, checkLinks = 8, skipGroups = [] } = {}) {
+  const skipGroupSet = new Set(skipGroups);
+  const skipKeys = new Set();
+  for (const g of skipGroupSet) for (const k of CHECK_GROUPS[g] || []) skipKeys.add(k);
+
   const url = normUrl(website);
   const checks = [];
   const meta = { input: website, resolved_url: url };
@@ -147,7 +166,7 @@ async function auditSite(website, { timeout = 20000, checkLinks = 8 } = {}) {
     checks.push(mkCheck("no_website", FAIL, "No website",
       "This business has no website on record.",
       `input value: ${JSON.stringify(website)}`, TIER_1));
-    return finalise(checks, meta, false, false);
+    return finalise(checks, meta, false, false, skipKeys);
   }
 
   const host = new URL(url).host;
@@ -157,7 +176,7 @@ async function auditSite(website, { timeout = 20000, checkLinks = 8 } = {}) {
     checks.push(mkCheck("robots_disallow", UNKNOWN, "robots.txt blocks us",
       "The site's robots.txt disallows automated fetching, so nothing was checked.",
       "robots.txt: Disallow", TIER_3));
-    return finalise(checks, meta, false, true);
+    return finalise(checks, meta, false, true, skipKeys);
   }
 
   // ---- fetch ------------------------------------------------------------
@@ -173,7 +192,7 @@ async function auditSite(website, { timeout = 20000, checkLinks = 8 } = {}) {
     checks.push(mkCheck("site_down", FAIL, "Site unreachable",
       "The website did not load.",
       `${exc.name || "Error"}: ${exc.message || exc}`, TIER_1));
-    return finalise(checks, meta, false, false);
+    return finalise(checks, meta, false, false, skipKeys);
   }
 
   const bytes = Buffer.byteLength(html, "utf8");
@@ -187,14 +206,14 @@ async function auditSite(website, { timeout = 20000, checkLinks = 8 } = {}) {
     checks.push(mkCheck("bot_protection", UNKNOWN, "Bot protection",
       "The site is behind bot protection, so no checks were run. Audit this one by hand or skip it.",
       `HTTP ${status} at ${finalUrl}`, TIER_3));
-    return finalise(checks, meta, true, true);
+    return finalise(checks, meta, true, true, skipKeys);
   }
 
   if (status >= 400) {
     checks.push(mkCheck("site_down", FAIL, `HTTP ${status}`,
       `The homepage returns HTTP ${status}.`,
       `GET ${finalUrl} -> ${status}`, TIER_1));
-    return finalise(checks, meta, false, false);
+    return finalise(checks, meta, false, false, skipKeys);
   }
 
   const $ = cheerio.load(html);
@@ -218,6 +237,8 @@ async function auditSite(website, { timeout = 20000, checkLinks = 8 } = {}) {
     checks.push(mkCheck("no_https", FAIL, "No HTTPS",
       "The site loads over plain HTTP, so browsers show a “Not secure” warning in the address bar.",
       `final URL after redirects: ${finalUrl}`, TIER_1));
+  } else if (skipGroupSet.has("https")) {
+    // https group disabled — skip the TLS handshake + redirect probe entirely
   } else {
     const days = await certDaysLeft(host);
     if (days === null) {
@@ -463,7 +484,7 @@ async function auditSite(website, { timeout = 20000, checkLinks = 8 } = {}) {
   }
 
   // ---- broken internal links -------------------------------------------
-  if (checkLinks) {
+  if (checkLinks && !skipGroupSet.has("broken_links")) {
     const seen = new Set();
     const finalNoTrail = finalUrl.replace(/\/+$/, "");
     $("a[href]").each((_, a) => {
@@ -503,10 +524,11 @@ async function auditSite(website, { timeout = 20000, checkLinks = 8 } = {}) {
   const cleaned = [...mails].filter((m) => !/\.(png|jpg|gif|webp)$/.test(m));
   meta.emails_found = cleaned.sort().slice(0, 5);
 
-  return finalise(checks, meta, true, false);
+  return finalise(checks, meta, true, false, skipKeys);
 }
 
-function finalise(checks, meta, reachable, blocked) {
+function finalise(checks, meta, reachable, blocked, skipKeys) {
+  if (skipKeys && skipKeys.size) checks = checks.filter((c) => !skipKeys.has(c.key));
   let hook = null;
   if (!blocked) {
     const eligible = checks.filter(
@@ -520,4 +542,4 @@ function finalise(checks, meta, reachable, blocked) {
   return { reachable, blocked, checks, hook, fail_count: fails.length, meta };
 }
 
-module.exports = { auditSite, UA, HOOK_WEIGHTS, PASS, FAIL, UNKNOWN };
+module.exports = { auditSite, UA, HOOK_WEIGHTS, CHECK_GROUPS, PASS, FAIL, UNKNOWN };

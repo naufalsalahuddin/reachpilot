@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, toast } from "../api.js";
+import { api, toast, FLOW_ENABLED } from "../api.js";
 import { Icon } from "../icons.jsx";
 
 export default function Dashboard() {
@@ -64,6 +64,7 @@ export default function Dashboard() {
       <div className="row" style={{ marginBottom: 14 }}>
         <h2 style={{ fontSize: 17 }}>Campaigns</h2><span className="spacer" />
         <button className="sm" onClick={tickAll}>Process jobs now</button>
+        {FLOW_ENABLED && <Link className="btn sm" to="/flow?new=1">{Icon.blockBranch} New flow</Link>}
         <Link className="btn primary sm" to="/campaign">{Icon.plus} New campaign</Link>
       </div>
 
@@ -73,11 +74,11 @@ export default function Dashboard() {
         <div className="card" key={c.id}>
           <div className="row">
             <div>
-              <h2>{c.name}</h2>
+              <h2>{c.name}{c.flow_id ? <span className="badge brand" style={{ marginLeft: 8 }}>flow</span> : null}</h2>
               <div className="sub" style={{ margin: 0 }}>{c.industry} · {c.city} · {c.emails_per_day}/day · AI: {c.ai_provider === "template" ? "templates" : c.ai_provider} · source: {c.source_provider}{c.active_jobs ? " · running…" : ""}</div>
             </div>
             <span className="spacer" />
-            <Link className="btn sm" to={`/campaign?id=${c.id}`}>Edit</Link>
+            <Link className="btn sm" to={c.flow_id ? `/flow?id=${c.id}` : `/campaign?id=${c.id}`}>Edit</Link>
             {c.pending_review ? <Link className="btn sm" to={`/review?campaign=${c.id}`}>Review ({c.pending_review})</Link> : null}
             <button className="sm primary" onClick={() => run(c.id)}>Run</button>
           </div>

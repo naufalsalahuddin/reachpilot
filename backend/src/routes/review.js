@@ -6,6 +6,7 @@ const { enqueueForDraft } = require("../sending/schedule");
 const { auditSite } = require("../lib/audit");
 const pagespeed = require("../lib/pagespeed");
 const { lintEmail } = require("../lib/contentLint");
+const flowEngine = require("../jobs/flowEngine");
 
 const router = express.Router();
 const int = (v, d = null) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : d; };
@@ -107,6 +108,23 @@ router.get("/api/drafts/:id", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// For flow-mode campaigns, a decided draft's lead is parked at a `review_gate`
+// node — resolve its approved/rejected edge (chasing any branches beyond it) and
+// advance the lead. Returns null for legacy (non-flow) campaigns, doing nothing.
+async function resolveFlowDecision(draftId, decision) {
+  const d = await prisma.drafts.findUnique({ where: { id: draftId }, select: { lead_id: true, campaign_id: true } });
+  if (!d) return null;
+  const campaign = await prisma.campaigns.findUnique({ where: { id: d.campaign_id }, select: { id: true, flow_id: true } });
+  if (!campaign || !campaign.flow_id) return null;
+  const { graph } = await flowEngine.loadGraph(campaign.id);
+  const lead = await prisma.leads.findUnique({ where: { id: d.lead_id } });
+  if (!lead || !lead.flow_node_id) return null;
+  const gateNode = graph.nodes.find((n) => n.id === lead.flow_node_id && n.type === "review_gate");
+  if (!gateNode) return null;
+  const nextNode = await flowEngine.advanceLeadTo(graph, gateNode.id, decision === "approved" ? "approved" : "rejected", lead);
+  return { nextNodeId: nextNode ? nextNode.id : null };
+}
+
 router.post("/api/decide", async (req, res) => {
   try {
     const b = req.body || {};
@@ -115,8 +133,9 @@ router.post("/api/decide", async (req, res) => {
     await data.decide(Number(draft_id), decision, subject, body, b.preview_text);
     // per-draft "attach the audit PDF" choice (null = follow the campaign default)
     if (b.attach_pdf !== undefined) await prisma.drafts.update({ where: { id: Number(draft_id) }, data: { attach_pdf: b.attach_pdf === null ? null : (b.attach_pdf ? 1 : 0) } });
+    const flow = await resolveFlowDecision(Number(draft_id), decision);
     let send = null;
-    if (decision === "approved") { try { send = await enqueueForDraft(draft_id); } catch (e) { send = { queued: 0, reason: e.message }; } }
+    if (decision === "approved") { try { send = await enqueueForDraft(draft_id, flow ? flow.nextNodeId : null); } catch (e) { send = { queued: 0, reason: e.message }; } }
     res.json({ ok: true, send });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -130,7 +149,8 @@ router.post("/api/decide/bulk", async (req, res) => {
       const d = await prisma.drafts.findUnique({ where: { id: Number(id) }, select: { subject: true, body: true, final_subject: true, final_body: true } });
       if (!d) continue;
       await data.decide(Number(id), decision, d.final_subject || d.subject || "", d.final_body || d.body || "");
-      if (decision === "approved") { try { const r = await enqueueForDraft(id); queued += r.queued || 0; } catch { /* ignore */ } }
+      const flow = await resolveFlowDecision(Number(id), decision);
+      if (decision === "approved") { try { const r = await enqueueForDraft(id, flow ? flow.nextNodeId : null); queued += r.queued || 0; } catch { /* ignore */ } }
     }
     res.json({ ok: true, count: draft_ids.length, queued });
   } catch (e) { res.status(500).json({ error: e.message }); }

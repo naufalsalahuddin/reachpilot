@@ -58,4 +58,24 @@ async function runBoth(url) {
   return { mobile: pick(mobile, "mobile"), desktop: pick(desktop, "desktop") };
 }
 
-module.exports = { runPagespeed, runBoth, runOne };
+/** Turn a {mobile,desktop} PageSpeed result into audit-style check objects (PASS/UNKNOWN/FAIL). */
+function buildChecks(psResult) {
+  const checks = [];
+  for (const strat of ["mobile", "desktop"]) {
+    const r = psResult && psResult[strat];
+    if (r && r.score != null) {
+      const evidence = Object.entries(r.metrics || {}).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join("; ");
+      checks.push({
+        key: `pagespeed_${strat}`,
+        state: r.score >= 90 ? "PASS" : r.score >= 50 ? "UNKNOWN" : "FAIL",
+        tier: 2,
+        label: `PageSpeed ${strat}: ${r.score}/100`,
+        detail: `Google Lighthouse performance score on ${strat} is ${r.score}/100.`,
+        evidence,
+      });
+    }
+  }
+  return checks;
+}
+
+module.exports = { runPagespeed, runBoth, runOne, buildChecks };

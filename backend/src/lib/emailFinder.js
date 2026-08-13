@@ -141,10 +141,16 @@ async function smtpVerify(email) {
   });
 }
 
+const ALL_STRATEGIES = ["scrape", "hunter", "permutations"];
+
 /**
+ * @param {object} opts
+ * @param {boolean} [opts.verify] - SMTP-verify guessed addresses (slow, off by default)
+ * @param {string[]} [opts.strategies] - which of ALL_STRATEGIES to run (default: all)
  * @returns {Promise<{email,type,status,first_name,candidates}|null>}
  */
-async function findBest(lead, { verify = config.emailFinder.smtpVerify } = {}) {
+async function findBest(lead, { verify = config.emailFinder.smtpVerify, strategies = ALL_STRATEGIES } = {}) {
+  const use = new Set(strategies && strategies.length ? strategies : ALL_STRATEGIES);
   const domain = lead.domain || (lead.website ? (() => { try { return new URL(lead.website).hostname.replace(/^www\./, ""); } catch { return null; } })() : null);
   const candidates = []; // {email, type, status, first_name, score}
 
@@ -157,19 +163,19 @@ async function findBest(lead, { verify = config.emailFinder.smtpVerify } = {}) {
   };
 
   // 1. scrape
-  const scraped = lead.website ? await scrapeSite(lead.website) : { emails: [], names: [] };
+  const scraped = (use.has("scrape") && lead.website) ? await scrapeSite(lead.website) : { emails: [], names: [] };
   scraped.emails.forEach((e) => push(e, "found"));
   const name0 = scraped.names[0] || (lead.first_name ? { first: lead.first_name, last: "" } : null);
 
   // 2. hunter
-  const hunter = await hunterFind(domain);
+  const hunter = use.has("hunter") ? await hunterFind(domain) : [];
   hunter.forEach((h) => push(h.email, h.confidence >= 80 ? "verified" : "hunter", h.first_name));
   const hunterName = hunter.find((h) => h.first_name);
 
   // 3. permutations (only if we have a name + domain and no personal address yet)
   const havePersonal = candidates.some((c) => c.type === "personal");
   const nm = name0 || (hunterName ? { first: hunterName.first_name, last: hunterName.last_name } : null);
-  if (!havePersonal && nm && domain) permutations(nm.first, nm.last, domain).forEach((e) => push(e, "guessed", nm.first));
+  if (use.has("permutations") && !havePersonal && nm && domain) permutations(nm.first, nm.last, domain).forEach((e) => push(e, "guessed", nm.first));
 
   if (!candidates.length) return null;
 
@@ -187,4 +193,4 @@ async function findBest(lead, { verify = config.emailFinder.smtpVerify } = {}) {
   return { email: best.email, type: best.type, status: best.status, first_name: best.first_name, candidates: candidates.slice(0, 6) };
 }
 
-module.exports = { findBest, classify, permutations, smtpVerify, scrapeSite, hunterFind };
+module.exports = { findBest, classify, permutations, smtpVerify, scrapeSite, hunterFind, ALL_STRATEGIES };

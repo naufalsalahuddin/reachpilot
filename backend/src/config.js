@@ -63,4 +63,8 @@ module.exports = {
     smtpVerify: process.env.VERIFY_EMAILS === "true", // port 25 outbound; many hosts block it
     verifyFrom: process.env.VERIFY_FROM || "verify@example.com",
   },
+
+  // Dark launch switch for the visual flow builder — off unless explicitly enabled,
+  // so a fresh deploy never ships it by accident. Flip to "true" when it's ready.
+  flowBuilderEnabled: process.env.FLOW_BUILDER_ENABLED === "true",
 };

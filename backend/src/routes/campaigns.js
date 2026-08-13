@@ -43,6 +43,7 @@ router.post("/api/campaigns", async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.name || !b.industry || !b.city) return res.status(400).json({ error: "name, industry and city are required" });
+    if (b.flow_id && !config.flowBuilderEnabled) return res.status(403).json({ error: "the flow builder isn't enabled on this deployment" });
     const defTz = await data.getSetting("default_timezone");
     const defSender = await data.getSetting("default_sender");
     const row = await prisma.campaigns.create({
@@ -53,6 +54,8 @@ router.post("/api/campaigns", async (req, res) => {
         ai_provider: b.ai_provider || "template", ai_model: b.ai_model || null, pitch_rules: b.pitch_rules || null,
         sender_name: b.sender_name || defSender || null, source_provider: b.source_provider || "google_places",
         timezone: defTz || null, status: "active", created_at: new Date(),
+        attach_report_pdf: b.attach_report_pdf === false ? 0 : 1,
+        flow_id: b.flow_id ? int(b.flow_id) : null,
       },
     });
     res.json({ id: row.id });
@@ -82,6 +85,9 @@ router.put("/api/campaigns/:id", async (req, res) => {
     if (b.email_template_id !== undefined) {
       data2.email_template_id = b.email_template_id ? int(b.email_template_id) : null;
     }
+    if (b.disabled_checks !== undefined) {
+      data2.disabled_checks = Array.isArray(b.disabled_checks) ? b.disabled_checks.join(",") : (b.disabled_checks || null);
+    }
     if (!Object.keys(data2).length) return res.json({ ok: true });
     await prisma.campaigns.update({ where: { id: int(req.params.id) }, data: data2 });
     res.json({ ok: true });
@@ -90,8 +96,19 @@ router.put("/api/campaigns/:id", async (req, res) => {
 
 router.post("/api/campaigns/:id/run", async (req, res) => {
   try {
-    const c = await prisma.campaigns.findUnique({ where: { id: int(req.params.id) }, select: { id: true } });
+    const c = await prisma.campaigns.findUnique({ where: { id: int(req.params.id) }, select: { id: true, flow_id: true } });
     if (!c) return res.status(404).json({ error: "not found" });
+
+    if (c.flow_id) {
+      const flowRow = await prisma.flows.findUnique({ where: { id: c.flow_id } });
+      if (!flowRow) return res.status(500).json({ error: "campaign's flow no longer exists" });
+      const graph = JSON.parse(flowRow.graph_json);
+      const entryNode = graph.nodes.find((n) => n.id === graph.entry);
+      if (!entryNode) return res.status(500).json({ error: "flow has no valid entry node" });
+      const jobId = await queue.enqueue(entryNode.type, c.id, {}, null, entryNode.id);
+      return res.json({ ok: true, job_id: jobId, stage: entryNode.type, node_id: entryNode.id });
+    }
+
     const stage = (req.body && req.body.stage) || "source";
     const jobId = await queue.enqueue(stage, c.id);
     res.json({ ok: true, job_id: jobId, stage });
