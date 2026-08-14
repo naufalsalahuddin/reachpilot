@@ -104,10 +104,31 @@ function validateEnv() {
   }
 }
 
+// The Prisma query engine can panic with "timer has gone away" under CPU-throttled
+// hosting (a known Rust/tokio issue triggered when the container gets frozen and
+// resumed) — it's transient, not a real DB/schema problem, so retry with backoff
+// instead of crash-looping the whole app on a bad moment. $disconnect() forces a
+// fresh engine spawn on the next attempt rather than reusing a possibly-broken one.
+async function withEngineRetry(fn, { retries = 5, baseDelayMs = 2000 } = {}) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt === retries) throw e;
+      const delay = baseDelayMs * 2 ** (attempt - 1);
+      console.warn(`[boot] attempt ${attempt}/${retries} failed (${e.message.split("\n")[0]}) — retrying in ${delay}ms`);
+      try { await prisma.$disconnect(); } catch { /* best effort */ }
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
 async function main() {
   validateEnv();
-  await applyPendingMigrations(prisma);
-  await auth.ensureAdmin();
+  await withEngineRetry(async () => {
+    await applyPendingMigrations(prisma);
+    await auth.ensureAdmin();
+  });
   app.listen(config.port, () => {
     console.log(`\n  Outreach API on http://localhost:${config.port}`);
     console.log(
