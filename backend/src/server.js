@@ -4,30 +4,13 @@
  * The frontend is a separate Vite + React SPA (./frontend) that calls this over
  * HTTPS with credentialed cookies, so CORS + a credentialed session are enabled.
  */
-const path = require("path");
-const { execSync } = require("child_process");
 const express = require("express");
 const session = require("express-session");
 const cors = require("cors");
 const config = require("./config");
 const auth = require("./auth");
-
-// Applies pending migrations before anything touches the DB. This runs here —
-// not just in package.json's "start" script — because some hosts launch this
-// file directly (`node src/server.js`) instead of going through `npm start`,
-// which would silently skip the migration and leave the schema stale.
-function applyPendingMigrations() {
-  console.log("[migrate] applying pending Prisma migrations…");
-  try {
-    execSync("npx --no-install prisma migrate deploy", {
-      stdio: "inherit",
-      cwd: path.join(__dirname, ".."),
-    });
-  } catch (e) {
-    console.error("[migrate] failed — refusing to start against a possibly-stale schema.");
-    process.exit(1);
-  }
-}
+const prisma = require("./lib/prisma");
+const { applyPendingMigrations } = require("./lib/migrate");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -123,7 +106,7 @@ function validateEnv() {
 
 async function main() {
   validateEnv();
-  applyPendingMigrations();
+  await applyPendingMigrations(prisma);
   await auth.ensureAdmin();
   app.listen(config.port, () => {
     console.log(`\n  Outreach API on http://localhost:${config.port}`);
