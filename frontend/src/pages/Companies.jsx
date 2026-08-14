@@ -55,6 +55,7 @@ export default function Companies() {
         <select style={{ width: "auto" }} value={sort} onChange={(e) => setSort(e.target.value)}>
           <option value="">Sort: recent activity</option>
           <option value="no_email">Sort: missing email first</option>
+          <option value="no_email_last">Sort: missing email last</option>
         </select>
         <button className="sm" onClick={() => load(1)}>Search</button>
         <span className="spacer" />

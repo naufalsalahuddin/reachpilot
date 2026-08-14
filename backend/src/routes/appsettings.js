@@ -7,7 +7,7 @@ const router = express.Router();
 const KEYS = ["default_timezone", "default_sender", "include_unsubscribe",
   "per_domain_daily_cap", "warmup_base", "warmup_step", "require_dmarc",
   "block_spammy_sends", "spam_block_threshold", "bounce_pause_rate", "outbound_webhook_url",
-  "brand_name", "brand_primary", "brand_secondary", "brand_logo"];
+  "brand_name", "brand_primary", "brand_secondary", "brand_logo", "hide_leads_no_email"];
 
 router.get("/api/appsettings", async (req, res) => {
   const out = {};

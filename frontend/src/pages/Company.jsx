@@ -30,6 +30,13 @@ export default function Company() {
     catch (e) { setMsg(e.message); }
   };
   const addNote = async () => { if (!note.trim()) { toast("Write a note first"); return; } try { await api(`/api/companies/${id}/notes`, { method: "POST", body: { body: note } }); setNote(""); toast("Note added"); load(); } catch (e) { toast(e.message); } };
+  const restore = async () => {
+    try {
+      const r = await api(`/api/companies/${id}/restore`, { method: "POST" });
+      toast(`Restored — ${r.suppressionRemoved} suppression entr${r.suppressionRemoved === 1 ? "y" : "ies"} cleared, ${r.sendsRequeued} send${r.sendsRequeued === 1 ? "" : "s"} re-queued`);
+      load();
+    } catch (e) { toast(e.message); }
+  };
 
   if (!d) return <div className="empty">Loading…</div>;
   if (d.error) return <div className="err">{d.error}</div>;
@@ -45,6 +52,14 @@ export default function Company() {
               <select style={{ width: "auto" }} value={form.status} onChange={(e) => saveStatus(e.target.value)}>{d.statuses.map((s) => <option key={s} value={s}>{s}</option>)}</select>
             </div>
             <div className="sub" style={{ margin: "6px 0 12px" }}>{c.website && <a href={c.website} target="_blank" rel="noopener noreferrer">{c.domain || c.website}</a>} {c.platform && <span className="tag">{c.platform}</span>}</div>
+            {c.status === "dnc" && (
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-start", background: "var(--fail-bg)", border: "1px solid var(--fail)", borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
+                <span style={{ flex: 1, fontSize: 13 }}>
+                  <b>Blocked from sending</b> — usually a bounce, unsubscribe, or manual block. If the email above was wrong, fix it in Details and save first, then restore.
+                </span>
+                <button className="sm" onClick={restore}>Restore &amp; resend</button>
+              </div>
+            )}
             {c.website && <img src={shot(c.website)} alt="homepage" style={{ width: "100%", borderRadius: 8, border: "1px solid var(--rule)", marginBottom: 12, background: "var(--bg)" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />}
             <div className="kv"><span className="k">Reviews</span><span>{c.review_count ? `${c.review_count} (${c.rating ? Number(c.rating).toFixed(1) : "?"}★)` : "—"}</span></div>
             <div className="kv"><span className="k">Email</span><span>{c.email || "—"} {c.email_type && <span className={`tag ${c.email_type}`}>{c.email_type}</span>}</span></div>

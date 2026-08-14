@@ -109,14 +109,22 @@ function Branding() {
 }
 
 function General() {
-  const [s, setS] = useState({ default_timezone: "", default_sender: "", include_unsubscribe: "1" });
+  const [s, setS] = useState({ default_timezone: "", default_sender: "", include_unsubscribe: "1", hide_leads_no_email: "0" });
   const [msg, setMsg] = useState("");
-  useEffect(() => { api("/api/appsettings").then((d) => setS({ default_timezone: d.default_timezone || "", default_sender: d.default_sender || "", include_unsubscribe: d.include_unsubscribe ?? "1" })).catch(() => {}); }, []);
+  useEffect(() => { api("/api/appsettings").then((d) => setS({ default_timezone: d.default_timezone || "", default_sender: d.default_sender || "", include_unsubscribe: d.include_unsubscribe ?? "1", hide_leads_no_email: d.hide_leads_no_email ?? "0" })).catch(() => {}); }, []);
   const save = async () => { setMsg("Saving…"); try { await api("/api/appsettings", { method: "PUT", body: s }); setMsg("Saved."); toast("Saved"); } catch (e) { setMsg(e.message); } };
   return <><Head t="General" s="Defaults applied to new campaigns." />
     <div className="card">
       <div className="field"><label className="fld">Default timezone</label><select value={s.default_timezone} onChange={(e) => setS({ ...s, default_timezone: e.target.value })}><option value="">(none)</option>{TIMEZONES.map((t) => <option key={t} value={t}>{t}</option>)}</select></div>
       <div className="field"><label className="fld">Default sender name</label><input value={s.default_sender} onChange={(e) => setS({ ...s, default_sender: e.target.value })} placeholder="e.g. Your name" /></div>
+    </div>
+    <Head t="Customers list" s="Applies to the Customers list and CSV export." />
+    <div className="card">
+      <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 14 }}>
+        <input type="checkbox" style={{ marginTop: 3 }} checked={s.hide_leads_no_email === "1"} onChange={(e) => setS({ ...s, hide_leads_no_email: e.target.checked ? "1" : "0" })} />
+        <span><b>Hide leads with no email address</b>
+          <div className="hint" style={{ marginTop: 4 }}>Off by default. When on, businesses with no email on file are hidden everywhere in Customers, not just sorted last.</div></span>
+      </label>
     </div>
     <Head t="Compliance" s="Applies to emails from your own inboxes (SMTP/Gmail). Instantly/Smartlead add their own opt-out." />
     <div className="card">

@@ -2,6 +2,8 @@
 const express = require("express");
 const prisma = require("../lib/prisma");
 const { cleanUrl } = require("../lib/url");
+const data = require("../lib/data");
+const suppress = require("../lib/suppress");
 
 const router = express.Router();
 const STATUSES = ["new", "contacted", "opened", "replied", "interested", "meeting", "customer", "lost", "dnc"];
@@ -17,6 +19,7 @@ async function buildWhere(q) {
     const ids = await prisma.leads.findMany({ where: { campaign_id: parseInt(q.campaign, 10) }, select: { company_id: true }, distinct: ["company_id"] });
     where.id = { in: ids.map((r) => r.company_id).filter(Boolean) };
   }
+  if ((await data.getSetting("hide_leads_no_email")) === "1") where.email = { not: null };
   return where;
 }
 
@@ -36,6 +39,8 @@ router.get("/api/companies", async (req, res) => {
     const total = await prisma.companies.count({ where });
     const orderBy = req.query.sort === "no_email"
       ? [{ email: { sort: "asc", nulls: "first" } }, { id: "desc" }]
+      : req.query.sort === "no_email_last"
+      ? [{ email: { sort: "asc", nulls: "last" } }, { id: "desc" }]
       : [{ last_activity: { sort: "desc", nulls: "last" } }, { id: "desc" }];
     const items = await prisma.companies.findMany({
       where, orderBy, skip: (page - 1) * per, take: per,
@@ -140,6 +145,43 @@ router.put("/api/companies/:id", async (req, res) => {
     for (const f of ["email", "email_type", "phone", "website", "city", "industry", "name"]) if (dataObj[f] !== undefined) leadSync[f] = dataObj[f];
     if (Object.keys(leadSync).length) await prisma.leads.updateMany({ where: { company_id: cid }, data: leadSync });
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Un-blocks a company after a bad email caused a bounce/suppression (or it was
+// suppressed manually) — clears any matching suppression entry (by exact email
+// or by domain, whichever matched), resets the status, and re-queues any
+// failed/suppressed/blocked sends for its leads so the next pipeline tick
+// actually resends using the corrected email (edit it via PUT first).
+router.post("/api/companies/:id/restore", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const company = await prisma.companies.findUnique({ where: { id } });
+    if (!company) return res.status(404).json({ error: "not found" });
+
+    let suppressionRemoved = 0;
+    if (company.email) {
+      const e = company.email.trim().toLowerCase();
+      const d = suppress.domainOf(e);
+      const or = [{ value: e }];
+      if (d) or.push({ kind: "domain", value: d });
+      const r = await prisma.suppression.deleteMany({ where: { OR: or } });
+      suppressionRemoved = r.count;
+    }
+
+    await prisma.companies.update({ where: { id }, data: { status: "new", last_activity: new Date() } });
+
+    const leadIds = (await prisma.leads.findMany({ where: { company_id: id }, select: { id: true } })).map((l) => l.id);
+    let sendsRequeued = 0;
+    if (leadIds.length) {
+      const r = await prisma.sends.updateMany({
+        where: { lead_id: { in: leadIds }, status: { in: ["failed", "suppressed", "blocked"] } },
+        data: { status: "queued", scheduled_at: new Date(), error: null },
+      });
+      sendsRequeued = r.count;
+    }
+
+    res.json({ ok: true, suppressionRemoved, sendsRequeued });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
