@@ -1,5 +1,9 @@
 generator client {
-  provider = "prisma-client-js"
+  provider   = "prisma-client-js"
+  // "library" (the default) panics with "timer has gone away" on some
+  // resource-constrained shared hosts — "binary" runs the query engine as a
+  // separate process instead of in-process, which sidesteps that class of bug.
+  engineType = "binary"
 }
 
 datasource db {
